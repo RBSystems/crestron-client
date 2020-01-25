@@ -6,7 +6,27 @@ This lib is based on [stealthflyers work](https://github.com/stealthflyer/Crestr
 ## Usage
 
 ```python
-c = CrestronClient("IP", "PORT")
-c.send_digital(81, True) # Join and value digital
-c.send_analog(81, 5000) # Join and value analog
+# ip, port, pid
+c = CrestronClient("127.0.0.1", 41794, 0x03)
+
+# change digital joins
+c.send_digital(80, True)
+
+# change analog joins
+c.send_analog(51, 5000)
+
+# handle digital and analog join changes
+
+def printme(join, value):
+    print('join: ')
+    print(join)
+    print('value: ')
+    print(value)
+
+
+c.addDigitalCallback(printme)
+c.addAnalogCallback(printme)
+while True:
+    c.poll()
+
 ```

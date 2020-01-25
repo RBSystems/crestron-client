@@ -7,7 +7,7 @@ class CIPMessage:
     def __init__(self, msgType, body):
         self.type = msgType
         self.length = len(body)
-        self.payload = bytearray(body)
+        self.payload = bytearray(map(lambda x: ord(chr(x % 256)), body))
 
     def create(self):
         msg = bytearray(3)
@@ -42,13 +42,16 @@ class HeartbeatThread(threading.Thread):
 class CrestronClient:
     button_mapping = {}
 
-    def __init__(self, ip, port=41794):
+    def __init__(self, ip, port=41794, pid=0x03):
+        self.pid = pid
+        self.digitalCallbacks = []
+        self.analogCallbacks = []
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.connect((ip, port))
         self.sock.settimeout(.1)
         self.heartbeat = HeartbeatThread(self)
         self.heartbeat.start()
-        self.poll()
+        self.poll()  # read first data and send connection message
 
     def poll(self):
         while True:
@@ -61,8 +64,14 @@ class CrestronClient:
         try:
             sent = self.sock.send(cip.create())
             return sent
-        except e:
+        except:
             return 0
+
+    def addDigitalCallback(self, fun):
+        self.digitalCallbacks.append(fun)
+
+    def addAnalogCallback(self, fun):
+        self.analogCallbacks.append(fun)
 
     def destroy_callback(self):
         self.heartbeat.stop()
@@ -100,8 +109,8 @@ class CrestronClient:
         elif cip.type == 0x0E:  # Heartbeat ack
             pass
         elif cip.type == 0x0F:
-            if cip.length == 1 and cip.payload[0] == 0x02:
-                self.send_message(CIPMessage(0x01, [0x7F, 0x00, 0x00, 0x01, 0x00, 0x04, 0x40]))  # 0x04 is the ID
+            if cip.length == 1 and cip.payload[0] == 0x02:  # connection start
+                self.send_message(CIPMessage(0x01, [0x7F, 0x00, 0x00, 0x01, 0x00, self.pid, 0x40]))  # 0x04 is the ID
             else:
                 raise RuntimeError("Bad registration")
 
@@ -129,23 +138,16 @@ class CrestronClient:
             pass
         elif jType == 0x03:  # Update request confirmation
             pass
-
-        # if you have custom join behavior, it goes in here
-        if jType == 0x00:
-            try:
-                obj = self.button_mapping[join]
-            except:
-                obj = None
-            if obj != None:
-                obj.set_active(value)
-                obj.queue_draw()
-        elif jType == 0x01:
-            if join == 1:  # volume
-                self.builder.get_object("volume").set_value(float(value))
+        if jType == 0x00:  # digital
+            for f in self.digitalCallbacks:
+                f(join, value)
+        elif jType == 0x01:  # analog
+            for f in self.analogCallbacks:
+                f(join, value)
 
     def receive_data(self):
         buf = bytearray(b" " * 1024)
-        rx = self.sock.recv_into(buf)
+        rx = self.sock.recv_into(buf, 1024)
         index = 0
         while index < rx:
             t = buf[index]
